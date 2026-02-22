@@ -1,193 +1,154 @@
 import streamlit as st
 
+# ✅ MUST be first Streamlit command
 st.set_page_config(
-    page_title="XRP Futures Risk Tool",
+    page_title="XRP Futures Risk Tool (PRO)",
     page_icon="🧮",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# -----------------------------
-# Header
-# -----------------------------
-st.markdown("# 🧮 XRP Futures Risk & Profit Tool")
-st.caption("Position sizing, margin check, fees impact, R:R, break-even win rate, and liquidation (approx).")
+# ---------------------------
+# 🔐 PASSWORD PROTECTION (PRO)
+# ---------------------------
+PASSWORD = "XRPPRO2025"  # change anytime
 
-# -----------------------------
-# Sidebar Inputs
-# -----------------------------
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("🔒 XRP Futures Risk Tool – PRO Access")
+    st.caption("Enter your access password to unlock the PRO calculator.")
+
+    user_password = st.text_input("Access password", type="password")
+
+    colA, colB = st.columns([1, 2])
+    with colA:
+        unlock = st.button("Unlock")
+    with colB:
+        st.info("If you purchased, your password is in your Payhip download file.")
+
+    if unlock:
+        if user_password == PASSWORD:
+            st.session_state.authenticated = True
+            st.success("Access Granted ✅")
+            st.rerun()
+        else:
+            st.error("Incorrect password ❌")
+
+    st.stop()
+
+# ---------------------------
+# ✅ APP (PRO)
+# ---------------------------
+st.markdown("# 🧮 XRP Futures Risk & Profit Tool (PRO)")
+st.caption("Fast position sizing, margin check, R:R, break-even win rate, and liquidation (approx).")
+
 st.sidebar.header("⚙️ Trade Inputs")
 
 balance = st.sidebar.number_input("Account balance (USDT)", min_value=0.0, value=100.0, step=10.0)
-risk_pct = st.sidebar.number_input("Risk %", min_value=0.0, value=1.0, step=0.1)
+risk_pct = st.sidebar.number_input("Risk % per trade", min_value=0.0, value=1.0, step=0.5)
 
 side = st.sidebar.selectbox("Side", ["Long", "Short"])
 lev = st.sidebar.number_input("Leverage (x)", min_value=1.0, value=10.0, step=1.0)
 
-entry = st.sidebar.number_input("Entry price (XRP)", min_value=0.0, value=0.5200, step=0.0001, format="%.4f")
-stop  = st.sidebar.number_input("Stop-loss price (XRP)", min_value=0.0, value=0.5100, step=0.0001, format="%.4f")
-take  = st.sidebar.number_input("Take-profit price (XRP)", min_value=0.0, value=0.5500, step=0.0001, format="%.4f")
+entry = st.sidebar.number_input("Entry price (XRP)", min_value=0.0, value=0.5200, format="%.4f")
+stop  = st.sidebar.number_input("Stop-loss price (XRP)", min_value=0.0, value=0.5100, format="%.4f")
+take  = st.sidebar.number_input("Take-profit price (XRP)", min_value=0.0, value=0.5500, format="%.4f")
 
-fee_mode = st.sidebar.selectbox("Fees preset", ["Binance Futures (0.06%)", "Custom"])
-fee_pct = 0.06 if fee_mode == "Binance Futures (0.06%)" else st.sidebar.number_input(
-    "Fee % per trade", min_value=0.0, value=0.06, step=0.01
-)
+fee_pct = st.sidebar.number_input("Fee % per trade (e.g. 0.06)", min_value=0.0, value=0.06, step=0.01)
 
-mmr_pct = st.sidebar.number_input("Maintenance margin % (MMR)", min_value=0.0, value=0.50, step=0.05)
+if st.sidebar.button("Calculate"):
+    # ---- Basic validation ----
+    if entry <= 0:
+        st.error("Entry price must be > 0.")
+        st.stop()
 
-calc_btn = st.sidebar.button("✅ Calculate", use_container_width=True)
+    if lev <= 0:
+        st.error("Leverage must be > 0.")
+        st.stop()
 
-# -----------------------------
-# Calculation
-# -----------------------------
-def calculate(balance, risk_pct, entry, stop, take, lev, fee_pct, mmr_pct, side):
-    if balance <= 0 or entry <= 0 or lev <= 0:
-        return {"error": "Balance, Entry, and Leverage must be > 0."}
-
-    side = side.lower()
-
-    # Validate direction logic
-    if side == "long":
-        if stop >= entry:
-            return {"error": "LONG: Stop-loss must be below Entry."}
-        if take <= entry:
-            return {"error": "LONG: Take-profit must be above Entry."}
+    # ---- Risk & reward per unit ----
+    if side == "Long":
         risk_per_unit = entry - stop
         reward_per_unit = take - entry
     else:
-        if stop <= entry:
-            return {"error": "SHORT: Stop-loss must be above Entry."}
-        if take >= entry:
-            return {"error": "SHORT: Take-profit must be below Entry."}
         risk_per_unit = stop - entry
         reward_per_unit = entry - take
 
     if risk_per_unit <= 0:
-        return {"error": "Invalid risk distance. Check Entry/Stop."}
+        st.error("Invalid Stop-Loss for selected side. (Risk per unit must be > 0)")
+        st.stop()
 
-    # Risk target in USDT
-    risk_usdt_target = balance * (risk_pct / 100.0)
+    # ---- Risk in USDT ----
+    risk_usdt = balance * (risk_pct / 100.0)
 
-    # Quantity XRP based on SL risk
-    qty_xrp = risk_usdt_target / risk_per_unit
+    # ---- Position sizing ----
+    qty = risk_usdt / risk_per_unit  # XRP quantity
+    notional = qty * entry           # USDT
+    margin = notional / lev          # USDT (isolated-like approximation)
 
-    # Notional & margin
-    notional = qty_xrp * entry
-    margin_required = notional / lev
+    # ---- PnL ----
+    loss = qty * risk_per_unit
+    profit = qty * reward_per_unit
 
-    # Fees estimate (entry + exit)
+    # ---- Fees (approx): entry + exit ----
     fee_rate = fee_pct / 100.0
-    fees_total = notional * fee_rate * 2
+    fees_est = notional * fee_rate * 2  # pay fee on entry & exit (approx)
 
-    # PnL to SL/TP including fee impact
-    loss_to_sl = qty_xrp * risk_per_unit + fees_total
-    profit_to_tp = qty_xrp * reward_per_unit - fees_total
+    # ---- R:R ----
+    rr = profit / loss if loss != 0 else 0
 
-    rr = profit_to_tp / loss_to_sl if loss_to_sl > 0 else 0
-    breakeven = 1.0 / (1.0 + rr) if rr > 0 else 1.0
+    # ---- Break-even win rate (simple) ----
+    # include fees as extra "cost" that must be recovered
+    # effective profit and loss after fees:
+    eff_profit = max(profit - fees_est, 0.0)
+    eff_loss = loss + fees_est
 
-    # Advanced liquidation (approx)
-    # Simplified equity-based approach: depends on remaining equity and maintenance margin.
-    maintenance_margin_rate = mmr_pct / 100.0
+    rr_eff = (eff_profit / eff_loss) if eff_loss != 0 else 0
+    breakeven = 1 / (1 + rr_eff) if rr_eff > 0 else 1.0
 
-    if qty_xrp <= 0:
-        return {"error": "Quantity is 0. Check inputs."}
-
-    if side == "long":
-        liq_price = entry - ((balance - margin_required) / qty_xrp) - (entry * maintenance_margin_rate)
+    # ---- Approx Liquidation Price (VERY SIMPLE MODEL) ----
+    # This is not exchange-accurate. Real liquidation depends on maintenance margin, fees, funding, and exchange rules.
+    if side == "Long":
+        liq_price = entry * (1 - (1 / lev))
+        liq_distance_pct = ((entry - liq_price) / entry) * 100
     else:
-        liq_price = entry + ((balance - margin_required) / qty_xrp) + (entry * maintenance_margin_rate)
+        liq_price = entry * (1 + (1 / lev))
+        liq_distance_pct = ((liq_price - entry) / entry) * 100
 
-    # Liquidation distance %
-    liq_distance_pct = abs((entry - liq_price) / entry) * 100.0 if entry > 0 else 0
+    # ---- UI Output ----
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Position Size (XRP)", f"{qty:,.2f}")
+    col2.metric("Margin Required (USDT)", f"{margin:,.2f}")
+    col3.metric("Loss (USDT)", f"{loss:,.2f}")
+    col4.metric("Profit (USDT)", f"{profit:,.2f}")
 
-    # Danger zone rating (simple)
-    # If liquidation is close (<3%) it's dangerous; 3–7 moderate; >7 safer
-    if liq_distance_pct < 3:
-        danger = "HIGH"
-    elif liq_distance_pct < 7:
-        danger = "MEDIUM"
+    st.divider()
+
+    colA, colB, colC = st.columns(3)
+    colA.metric("Fees (est.)", f"{fees_est:,.2f} USDT")
+    colB.metric("Break-even win rate", f"{breakeven*100:.2f}%")
+    colC.metric("Approx Liquidation Price", f"{liq_price:.4f} XRP")
+
+    st.caption(f"Liquidation distance (approx): **{liq_distance_pct:.2f}%** from entry.")
+
+    st.divider()
+
+    # ---- R:R badge ----
+    if rr >= 2:
+        st.success(f"Reward:Risk = {rr:.2f} ✅ Strong setup")
+    elif rr >= 1:
+        st.warning(f"Reward:Risk = {rr:.2f} ⚠️ Moderate")
     else:
-        danger = "LOW"
+        st.error(f"Reward:Risk = {rr:.2f} ❌ Weak")
 
-    return {
-        "risk_target": risk_usdt_target,
-        "qty_xrp": qty_xrp,
-        "notional": notional,
-        "margin": margin_required,
-        "fees": fees_total,
-        "loss": loss_to_sl,
-        "profit": profit_to_tp,
-        "rr": rr,
-        "breakeven": breakeven,
-        "liq_price": liq_price,
-        "liq_distance_pct": liq_distance_pct,
-        "danger": danger,
-    }
+    # ---- Margin/risk warnings ----
+    if margin > balance:
+        st.error("⚠️ Not enough balance for margin. Reduce position size or increase leverage.")
+    if loss > balance * 0.03:
+        st.warning("⚠️ Risk above 3% — aggressive position.")
 
-# -----------------------------
-# UI Output
-# -----------------------------
-if not calc_btn:
-    st.info("👈 Enter values in the sidebar, then click **Calculate**.")
+    st.info("Disclaimer: Liquidation price is an approximation. Real liquidation depends on exchange maintenance margin, fees, and funding.")
 else:
-    res = calculate(balance, risk_pct, entry, stop, take, lev, fee_pct, mmr_pct, side)
-
-    if "error" in res:
-        st.error(res["error"])
-    else:
-        # Top metrics
-        t1, t2, t3, t4 = st.columns(4)
-        t1.metric("Risk target ($)", f"{res['risk_target']:.2f} USDT")
-        t2.metric("Position size", f"{res['qty_xrp']:.2f} XRP")
-        t3.metric("Notional", f"{res['notional']:.2f} USDT")
-        t4.metric("Margin required", f"{res['margin']:.2f} USDT")
-
-        st.divider()
-
-        # PnL + Fees
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Fees (est.)", f"{res['fees']:.2f} USDT")
-        c2.metric("Loss to SL (fees incl.)", f"{res['loss']:.2f} USDT")
-        c3.metric("Profit to TP (fees incl.)", f"{res['profit']:.2f} USDT")
-
-        st.divider()
-
-        # RR + breakeven
-        left, right = st.columns([1, 1])
-        rr = res["rr"]
-
-        if rr >= 2:
-            left.success(f"Reward:Risk (R:R) = **{rr:.2f}** ✅ Strong setup")
-        elif rr >= 1:
-            left.warning(f"Reward:Risk (R:R) = **{rr:.2f}** ⚠️ Moderate")
-        else:
-            left.error(f"Reward:Risk (R:R) = **{rr:.2f}** ❌ Weak")
-
-        right.metric("Break-even win rate", f"{res['breakeven']*100:.2f}%")
-
-        st.divider()
-
-        # Liquidation block
-        l1, l2, l3 = st.columns(3)
-        l1.metric("Liquidation (Advanced, approx)", f"{res['liq_price']:.4f} XRP")
-        l2.metric("Liq distance from entry", f"{res['liq_distance_pct']:.2f}%")
-
-        if res["danger"] == "HIGH":
-            l3.error("Danger: HIGH ⚠️")
-        elif res["danger"] == "MEDIUM":
-            l3.warning("Danger: MEDIUM ⚠️")
-        else:
-            l3.success("Danger: LOW ✅")
-
-        st.divider()
-
-        # Warnings
-        if res["margin"] > balance:
-            st.error("⚠️ Not enough margin. Increase leverage or reduce risk / position size.")
-        if risk_pct > 3:
-            st.warning("⚠️ Risk > 3% is aggressive. Consider 0.5%–2% for safer trading.")
-        if res["profit"] <= 0:
-            st.warning("⚠️ Fees are eating profit. Consider larger TP or lower fees (maker).")
-
-        st.caption("Educational tool only. Liquidation is approximate and can differ by exchange rules (tiered MMR, funding, fees, etc.).")
+    st.info("Set inputs in the sidebar and click **Calculate**.")
