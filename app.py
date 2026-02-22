@@ -2,35 +2,28 @@ import streamlit as st
 
 st.set_page_config(
     page_title="XRP Futures Risk Tool",
-    page_icon="📈",
-    layout="wide"
+    page_icon="🧮",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-st.title("📈 XRP Futures Risk & Position Calculator")
-st.markdown("Professional risk management tool for XRP Futures traders.")
+st.markdown("# 🧮 XRP Futures Risk & Profit Tool")
+st.caption("Fast position sizing, margin check, R:R, and break-even win rate for XRP Futures.")
 
-# --- SIDEBAR INPUTS ---
-st.sidebar.header("Trade Settings")
+st.sidebar.header("⚙️ Trade Inputs")
 
-balance = st.sidebar.number_input("Account Balance (USDT)", value=100.0)
-risk_pct = st.sidebar.number_input("Risk % per Trade", value=1.0)
-entry = st.sidebar.number_input("Entry Price", value=0.5200, format="%.4f")
-stop = st.sidebar.number_input("Stop Loss", value=0.5100, format="%.4f")
-take = st.sidebar.number_input("Take Profit", value=0.5500, format="%.4f")
-lev = st.sidebar.number_input("Leverage", value=10.0)
-side = st.sidebar.selectbox("Position Type", ["Long", "Short"])
+balance = st.sidebar.number_input("Account balance (USDT)", min_value=0.0, value=100.0)
+risk_pct = st.sidebar.number_input("Risk %", min_value=0.0, value=1.0)
 
-fee_option = st.sidebar.selectbox(
-    "Fee Type",
-    ["Binance Futures (0.06%)", "Custom"]
-)
+side = st.sidebar.selectbox("Side", ["Long", "Short"])
+lev = st.sidebar.number_input("Leverage (x)", min_value=1.0, value=10.0)
 
-if fee_option == "Binance Futures (0.06%)":
-    fee_pct = 0.06
-else:
-    fee_pct = st.sidebar.number_input("Custom Fee %", value=0.06)
+entry = st.sidebar.number_input("Entry price", min_value=0.0, value=0.5200, format="%.4f")
+stop  = st.sidebar.number_input("Stop-loss price", min_value=0.0, value=0.5100, format="%.4f")
+take  = st.sidebar.number_input("Take-profit price", min_value=0.0, value=0.5500, format="%.4f")
 
-# --- CALCULATION ---
+fee_pct = st.sidebar.number_input("Fee % per trade", min_value=0.0, value=0.06)
+
 if st.sidebar.button("Calculate"):
 
     if side == "Long":
@@ -41,44 +34,30 @@ if st.sidebar.button("Calculate"):
         reward_per_unit = entry - take
 
     risk_usdt = balance * (risk_pct / 100)
-    qty = risk_usdt / risk_per_unit
+
+    qty = risk_usdt / risk_per_unit if risk_per_unit != 0 else 0
     notional = qty * entry
-    margin = notional / lev
+    margin = notional / lev if lev != 0 else 0
 
-    fee_rate = fee_pct / 100
-    total_fees = notional * fee_rate * 2
+    loss = qty * risk_per_unit
+    profit = qty * reward_per_unit
 
-    loss = qty * risk_per_unit + total_fees
-    profit = qty * reward_per_unit - total_fees
-
-    rr = profit / loss
-    breakeven = 1 / (1 + rr)
+    rr = profit / loss if loss != 0 else 0
+    breakeven = 1 / (1 + rr) if rr != 0 else 1
 
     col1, col2, col3 = st.columns(3)
 
-    col1.metric("Position Size (XRP)", f"{qty:,.2f}")
-    col2.metric("Margin Required", f"{margin:,.2f} USDT")
-    col3.metric("Risk ($)", f"{loss:,.2f} USDT")
+    col1.metric("Margin Required", f"{margin:.2f} USDT")
+    col2.metric("Loss ($)", f"{loss:.2f} USDT")
+    col3.metric("Profit ($)", f"{profit:.2f} USDT")
 
     st.divider()
-
-    col4, col5 = st.columns(2)
 
     if rr >= 2:
-        col4.success(f"Reward/Risk: {rr:.2f} 🔥 Excellent")
+        st.success(f"Reward:Risk = {rr:.2f} ✅ Strong setup")
     elif rr >= 1:
-        col4.warning(f"Reward/Risk: {rr:.2f} ⚠ Moderate")
+        st.warning(f"Reward:Risk = {rr:.2f} ⚠️ Moderate")
     else:
-        col4.error(f"Reward/Risk: {rr:.2f} ❌ Poor Setup")
+        st.error(f"Reward:Risk = {rr:.2f} ❌ Weak")
 
-    col5.metric("Break-even Win Rate", f"{breakeven*100:.2f}%")
-
-    st.divider()
-
-    if margin > balance:
-        st.error("⚠ Not enough margin. Reduce position size or increase leverage.")
-
-    if loss > balance * 0.03:
-        st.warning("⚠ Risk above 3% — aggressive position.")
-
-    st.info("Always manage risk properly. This tool is for educational purposes only.")
+    st.metric("Break-even win rate", f"{breakeven*100:.2f}%")
