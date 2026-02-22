@@ -42,6 +42,12 @@ if st.sidebar.button("Calculate"):
     loss = qty * risk_per_unit
     profit = qty * reward_per_unit
 
+    # --- Approx Liquidation Price (simple model) ---
+    if side == "Long":
+        liq_price = entry * (1 - (1 / lev))
+    else:
+        liq_price = entry * (1 + (1 / lev))
+
     rr = profit / loss if loss != 0 else 0
     breakeven = 1 / (1 + rr) if rr != 0 else 1
 
@@ -61,3 +67,4 @@ if st.sidebar.button("Calculate"):
         st.error(f"Reward:Risk = {rr:.2f} ❌ Weak")
 
     st.metric("Break-even win rate", f"{breakeven*100:.2f}%")
+    st.metric("Approx Liquidation Price", f"{liq_price:.4f}")
